@@ -2,7 +2,7 @@ name: AUR Matrix Package Build and Publish
 
 on:
   # Manual trigger enabled
-  workflow_dispatch: {}
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * 0'
 
