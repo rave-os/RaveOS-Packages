@@ -82,7 +82,7 @@ jobs:
           # The HOME for the shell session needs to be /root, but we run commands as 'builder'
           
         run: |
-          echo "Building package: $PKG_NAME"
+          echo "Building package"
           
           # --- Setup for Builder User ---
           BUILD_DIR=/home/${{ env.BUILDER_USER }}/build/${{ matrix.package_name }}
@@ -94,7 +94,8 @@ jobs:
           
           cd $BUILD_DIR
           
-          # 2. Build the package AS THE BUILDER USER
+          # 2. Build the package AS THE BUILDER USER, remove previous runs pkgs, if any
+          rm -f *.pkg.tar.zst *.pkg.tar.zst.sig
           # The makepkg command will now succeed because it is not running as root.
           sudo -u ${{ env.BUILDER_USER }} makepkg -s -f --skipchecksums --skippgpcheck --noconfirm
           
