@@ -38,16 +38,20 @@ jobs:
       # NOTE: options: --user root is removed. We start as root (default) to set up the builder.
 
     steps:
-      - name: Setup Builder User and Install Dependencies
+    - name: ⚙️ Setup Builder User and Install Dependencies
         run: |
-          # 1. Create a non-root user 'builder' with a passwordless sudo entry
-          useradd -m -u 1000 ${{ env.BUILDER_USER }}
-          echo '${{ env.BUILDER_USER }} ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+          # The shell running this script is already ROOT, so no need for 'sudo' here.
           
-          # 2. Install base dependencies (sudo is necessary for the builder to install makepkg dependencies)
+          # 1. Create a non-root user 'builder' and grant passwordless sudo access
+          useradd -m -u 1000 ${{ env.BUILDER_USER }}
+          echo '${{ env.BUILDER_USER }} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder_user # Use /etc/sudoers.d/ for a clean setup
+          
+          # 2. Install dependencies (must install 'sudo' first, as it is needed later)
           pacman -Sy --noconfirm
           pacman -S --noconfirm base-devel git sudo
           
+          # NOTE: We ensure 'sudo' is installed, but it is not used in this step.
+
       - name: Checkout Repository
         uses: actions/checkout@v4
         
