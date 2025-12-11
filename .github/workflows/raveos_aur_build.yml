@@ -40,17 +40,20 @@ jobs:
     steps:
       - name: Setup Builder User and Install Dependencies
         run: |
-          # The shell running this script is already ROOT, so no need for 'sudo' here.
-          
-          # 1. Create a non-root user 'builder' and grant passwordless sudo access
-          useradd -m -u 1000 ${{ env.BUILDER_USER }}
-          echo '${{ env.BUILDER_USER }} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder_user # Use /etc/sudoers.d/ for a clean setup
-          
-          # 2. Install dependencies (must install 'sudo' first, as it is needed later)
+          # 1. Install dependencies first, including 'sudo', which creates necessary files.
           pacman -Sy --noconfirm
           pacman -S --noconfirm base-devel git sudo
           
-          # NOTE: We ensure 'sudo' is installed, but it is not used in this step.
+          # 2. Ensure the /etc/sudoers.d directory exists and has correct permissions
+          mkdir -p /etc/sudoers.d
+          chmod 0755 /etc/sudoers.d
+          
+          # 3. Create a non-root user 'builder'
+          useradd -m -u 1000 ${{ env.BUILDER_USER }}
+          
+          # 4. Grant passwordless sudo access to the builder user (now the directory exists)
+          echo '${{ env.BUILDER_USER }} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder_user
+          chmod 0440 /etc/sudoers.d/builder_user
 
       - name: Checkout Repository
         uses: actions/checkout@v4
