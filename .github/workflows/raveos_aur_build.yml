@@ -1,11 +1,13 @@
-name: AUR Matrix Package Build and Publish
+name: RaveOS AUR Package Build and Publish
 
 on:
-  # Manual trigger enabled
-  workflow_dispatch:
+  # Manual Trigger
+  workflow_dispatch: {}
+  
+  # Scheduled Run (Every Sunday at 00:00 UTC)
   schedule:
-    - cron: '0 0 * * 0'
-
+    - cron: '0 0 * * 0' 
+  
 permissions:
   contents: write
 
@@ -31,8 +33,9 @@ jobs:
           
     name: Build ${{ matrix.package_name }}
 
+    # Uses the correct Arch Linux Docker image and runs as root
     container:
-      image: archlinux:latest # Corrected image name
+      image: archlinux:latest
       options: --user root
 
     steps:
@@ -48,7 +51,6 @@ jobs:
         run: mkdir -p ${{ env.REPO_NAME }}
         
       - name: Import GPG Key for Signing
-        # CRITICAL FIX: Set GNUPGHOME to /root/.gnupg for consistency
         env:
           GNUPGHOME: /root/.gnupg 
         run: |
@@ -56,13 +58,11 @@ jobs:
           mkdir -p $GNUPGHOME
           chmod 700 $GNUPGHOME
           
-          # Import the private key
+          # Import key using secret
           echo "${{ secrets.GPG_PRIVATE_KEY }}" > private.key
-          # Use --pinentry-mode loopback and the passphrase for non-interactive import
-          gpg --batch --pinentry-mode loopback --import private.key
+          gpg --batch --pinentry-mode loopback --passphrase ${{ secrets.GPG_PASSPHRASE }} --import private.key
           
-          # Set the imported key as ultimately trusted (required for automated signing)
-          # Finds the imported key ID
+          # Set key trust level
           KEYID=$(gpg --batch --list-secret-keys --with-colons | grep -B 1 sec | grep -oP '(?<=^sec:)[^:]+')
           echo -e "trust\n5\ny\n" | gpg --batch --command-fd 0 --edit-key $KEYID
           
@@ -72,25 +72,23 @@ jobs:
         id: build
         env:
           PKG_NAME: ${{ matrix.package_name }}
-          GNUPGHOME: /root/.gnupg # CRITICAL FIX: Ensure makepkg uses the imported key
+          GNUPGHOME: /root/.gnupg
         run: |
           echo "Building package: $PKG_NAME"
           
-          # 1. Clone the AUR PKGBUILD
           git clone "https://aur.archlinux.org/$PKG_NAME.git"
           cd "$PKG_NAME"
           
-          # 2. Build the package and install dependencies
+          # Build package (-s: install deps, --noconfirm: non-interactive)
           makepkg -s --skipchecksums --skippgpcheck --noconfirm
           
-          # 3. Find the built package (.pkg.tar.zst)
           BUILT_PKG=$(find . -maxdepth 1 -name '*.pkg.tar.zst' | head -n 1)
           if [ -z "$BUILT_PKG" ]; then
             echo "::error::Package build failed or .pkg.tar.zst file not found."
             exit 1
           fi
           
-          # 4. Sign the package using the key in $GNUPGHOME
+          # Sign the package
           makepkg --sign
           
           echo "pkg_file=$BUILT_PKG" >> $GITHUB_OUTPUT
@@ -101,7 +99,7 @@ jobs:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
           PKG_FILE: ${{ steps.build.outputs.pkg_file }}
           PKG_DIR: ${{ steps.build.outputs.pkg_dir }}
-          GNUPGHOME: /root/.gnupg # CRITICAL FIX: Ensure repo-add uses the imported key
+          GNUPGHOME: /root/.gnupg
         run: |
           PKG_NAME=$(basename -s .pkg.tar.zst "$PKG_FILE" | sed -E 's/^(.*)-[0-9].*$/\1/')
           
@@ -110,16 +108,15 @@ jobs:
           mv "$PKG_DIR"/"$PKG_FILE.sig" ${{ env.REPO_NAME }}/
 
           # 2. Update and sign the repository database
-          # repo-add relies on gpg configuration in $GNUPGHOME
           repo-add -s -k "$GPG_KEY_ID" ${{ env.REPO_NAME }}/${{ env.REPO_NAME }}.db.tar.gz ${{ env.REPO_NAME }}/"$PKG_FILE"
 
-          # 3. Clean up older package versions (Keep only $MAX_PKG_VERSIONS)
+          # 3. Clean up older package versions
           cd ${{ env.REPO_NAME }}
           
           FILES_TO_DELETE=$(
             find . -maxdepth 1 -type f -name "${PKG_NAME}-*.pkg.tar.zst" \
             | sort -Vr \
-            | tail -n +$((ENV.MAX_PKG_VERSIONS + 1))
+            | tail -n +$((env.MAX_PKG_VERSIONS + 1))
           )
           
           if [ -n "$FILES_TO_DELETE" ]; then
@@ -140,6 +137,6 @@ jobs:
       - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Build: Update ${{ matrix.package_name }} and repository database"
+          commit_message: "Build: Update ${{ matrix.package_name }} and repository database (RaveOS Repo)"
           branch: main
           file_pattern: '${{ env.REPO_NAME }}/**'
