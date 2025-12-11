@@ -61,16 +61,19 @@ jobs:
           mkdir -p $GNUPGHOME
           chmod 700 $GNUPGHOME
           
-          # Import key using secret
           echo "${{ secrets.GPG_PRIVATE_KEY }}" > private.key
           gpg --batch --pinentry-mode loopback --passphrase ${{ secrets.GPG_PASSPHRASE }} --import private.key
           
-          # Set key trust level
-          KEYID=$(gpg --batch --list-secret-keys --with-colons | grep -B 1 sec | grep -oP '(?<=^sec:)[^:]+')
+          # --- CRITICAL FIX: Simplify KEYID extraction ---
+          # Get the ID of the first secret key found
+          KEYID=$(gpg --batch --list-secret-keys --keyid-format long | grep sec | head -n 1 | awk '{print $2}' | cut -d/ -f2)
+          echo "Found Key ID: $KEYID"
+          
+          # Set the imported key as ultimately trusted
           echo -e "trust\n5\ny\n" | gpg --batch --command-fd 0 --edit-key $KEYID
           
           rm private.key
-          
+
       - name: Fetch and Build Package
         id: build
         env:
@@ -97,7 +100,7 @@ jobs:
           echo "pkg_file=$BUILT_PKG" >> $GITHUB_OUTPUT
           echo "pkg_dir=$PKG_NAME" >> $GITHUB_OUTPUT
 
-      - name: 💾 Publish and Clean Repository
+      - name: Publish and Clean Repository
         env:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
           PKG_FILE: ${{ steps.build.outputs.pkg_file }}
