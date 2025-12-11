@@ -97,14 +97,12 @@ jobs:
           echo "pkg_file=$BUILT_PKG" >> $GITHUB_OUTPUT
           echo "pkg_dir=$PKG_NAME" >> $GITHUB_OUTPUT
 
-      - name: Publish and Clean Repository
+      - name: 💾 Publish and Clean Repository
         env:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
           PKG_FILE: ${{ steps.build.outputs.pkg_file }}
           PKG_DIR: ${{ steps.build.outputs.pkg_dir }}
           GNUPGHOME: /root/.gnupg
-          # CRITICAL FIX: Calculate the skip count here to avoid the YAML error on line 108
-          SKIP_COUNT: '${{ env.MAX_PKG_VERSIONS + 1 }}' 
         run: |
           PKG_NAME=$(basename -s .pkg.tar.zst "$PKG_FILE" | sed -E 's/^(.*)-[0-9].*$/\1/')
           
@@ -118,10 +116,16 @@ jobs:
           # 3. Clean up older package versions
           cd ${{ env.REPO_NAME }}
           
+          # CRITICAL FIX: Define the arithmetic in a shell variable first, 
+          # then use that variable in the tail command. This separates 
+          # the variable definition from the main cleanup logic line.
+          # This should resolve the parsing error.
+          VERSIONS_TO_SKIP=$(( ${{ env.MAX_PKG_VERSIONS }} + 1 ))
+          
           FILES_TO_DELETE=$(
             find . -maxdepth 1 -type f -name "${PKG_NAME}-*.pkg.tar.zst" \
             | sort -Vr \
-            | tail -n +${{ env.SKIP_COUNT }}  # Uses the pre-calculated value (e.g., +3)
+            | tail -n +$VERSIONS_TO_SKIP 
           )
           
           if [ -n "$FILES_TO_DELETE" ]; then
