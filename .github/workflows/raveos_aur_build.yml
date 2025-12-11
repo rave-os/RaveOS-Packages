@@ -103,8 +103,7 @@ jobs:
           PKG_FILE: ${{ steps.build.outputs.pkg_file }}
           PKG_DIR: ${{ steps.build.outputs.pkg_dir }}
           GNUPGHOME: /root/.gnupg
-          # NEW ENV: Calculate MAX_PKG_VERSIONS + 1 outside the run block
-          # This should be line ~69, well before line 74
+          # CRITICAL FIX: Calculate the skip count here to avoid the YAML error on line 108
           SKIP_COUNT: ${{ env.MAX_PKG_VERSIONS + 1 }} 
         run: |
           PKG_NAME=$(basename -s .pkg.tar.zst "$PKG_FILE" | sed -E 's/^(.*)-[0-9].*$/\1/')
@@ -119,11 +118,10 @@ jobs:
           # 3. Clean up older package versions
           cd ${{ env.REPO_NAME }}
           
-          # Use the pre-calculated SKIP_COUNT environment variable directly (no shell arithmetic needed here)
           FILES_TO_DELETE=$(
             find . -maxdepth 1 -type f -name "${PKG_NAME}-*.pkg.tar.zst" \
             | sort -Vr \
-            | tail -n +${{ env.SKIP_COUNT }}  # FIX APPLIED HERE (was line 74 before)
+            | tail -n +${{ env.SKIP_COUNT }}  # Uses the pre-calculated value (e.g., +3)
           )
           
           if [ -n "$FILES_TO_DELETE" ]; then
