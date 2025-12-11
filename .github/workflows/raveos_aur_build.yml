@@ -24,12 +24,8 @@ jobs:
       fail-fast: false
       matrix:
         package_name: 
-          - lib32-gtk2
-          - gtk2
-          - hydrapaper
-          - kdoctools5
-          - yaru-gtk-theme
-          - gnome-clocks
+          - yaru
+          - gnome-clocks-git
           
     name: Build ${{ matrix.package_name }}
 
