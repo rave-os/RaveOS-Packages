@@ -25,7 +25,6 @@ jobs:
       matrix:
         package_name: 
           - yaru
-          - gnome-clocks-git
           
     name: Build ${{ matrix.package_name }}
 
@@ -79,13 +78,16 @@ jobs:
         id: build
         env:
           PKG_NAME: ${{ matrix.package_name }}
-          # The HOME for the shell session needs to be /root, but we run commands as 'builder'
-          
         run: |
-          echo "Building package"
-          
-          # --- Setup for Builder User ---
+          echo "Building package: $PKG_NAME"
+
           BUILD_DIR=/home/${{ env.BUILDER_USER }}/build/${{ matrix.package_name }}
+          
+          # --- CRITICAL CLEANUP: Remove old build directories before clone ---
+          # This guarantees makepkg starts from a clean slate.
+          if [ -d "$BUILD_DIR" ]; then
+            rm -rf "$BUILD_DIR"
+          fi
           mkdir -p $BUILD_DIR
           chown -R ${{ env.BUILDER_USER }}:${{ env.BUILDER_USER }} /home/${{ env.BUILDER_USER }}
 
@@ -94,33 +96,30 @@ jobs:
           
           cd $BUILD_DIR
           
-          # 2. Build the package AS THE BUILDER USER, remove previous runs pkgs, if any
-          rm -f *.pkg.tar.zst *.pkg.tar.zst.sig
-          # The makepkg command will now succeed because it is not running as root.
+          # 2. Build the package AS THE BUILDER USER
+          # Use -f to silence the error, but the cleanup above is the real fix.
           sudo -u ${{ env.BUILDER_USER }} makepkg -s -f --skipchecksums --skippgpcheck --noconfirm
           
+          # Check for success (find the built package)
           BUILT_PKG=$(find . -maxdepth 1 -name '*.pkg.tar.zst' | head -n 1)
           if [ -z "$BUILT_PKG" ]; then
             echo "::error::Package build failed or .pkg.tar.zst file not found."
             exit 1
           fi
           
-          # 3. Copy GPG files to builder's home temporarily for signing
-          # Copy .gnupg from root to builder's home and set permissions
+          # 3. Copy GPG files and Sign the package AS THE BUILDER USER
           cp -r /root/.gnupg /home/${{ env.BUILDER_USER }}/
           chown -R ${{ env.BUILDER_USER }}:${{ env.BUILDER_USER }} /home/${{ env.BUILDER_USER }}/.gnupg
           
-          # 4. Sign the package AS THE BUILDER USER
-          # makepkg will now find the key in the builder's home directory
           sudo -u ${{ env.BUILDER_USER }} makepkg --sign
           
-          # 5. Move the built files back to the root context for publishing
+          # 4. Move the built files back to the root context for publishing
           mv $BUILT_PKG /root/
           mv $BUILT_PKG.sig /root/
           
           echo "pkg_file=/root/$BUILT_PKG" >> $GITHUB_OUTPUT
           echo "pkg_dir=$PKG_NAME" >> $GITHUB_OUTPUT
-
+          
       - name: Publish and Clean Repository
         env:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
