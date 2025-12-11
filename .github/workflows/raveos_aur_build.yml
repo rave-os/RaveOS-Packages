@@ -4,20 +4,17 @@ on:
   push:
     branches:
       - main
-  # Manual Trigger
   workflow_dispatch: {}
-  
-  # Scheduled Run (Every Sunday at 00:00 UTC)
   schedule:
-    - cron: '0 0 * * 0' 
+    - cron: '0 0 * * 0' # Runs every Sunday at 00:00 UTC
   
 permissions:
   contents: write
 
 env:
-  # Variables for package management
   REPO_NAME: raveos-repo
   MAX_PKG_VERSIONS: 2
+  BUILDER_USER: builder # New environment variable for the non-root user
   
 jobs:
   build_package:
@@ -26,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package_name:
+        package_name: 
           - lib32-gtk2
           - gtk2
           - hydrapaper
@@ -36,16 +33,20 @@ jobs:
           
     name: Build ${{ matrix.package_name }}
 
-    # Uses the correct Arch Linux Docker image and runs as root
     container:
       image: archlinux:latest
-      options: --user root
+      # NOTE: options: --user root is removed. We start as root (default) to set up the builder.
 
     steps:
-      - name: Install Build Dependencies
+      - name: Setup Builder User and Install Dependencies
         run: |
+          # 1. Create a non-root user 'builder' with a passwordless sudo entry
+          useradd -m -u 1000 ${{ env.BUILDER_USER }}
+          echo '${{ env.BUILDER_USER }} ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+          
+          # 2. Install base dependencies (sudo is necessary for the builder to install makepkg dependencies)
           pacman -Sy --noconfirm
-          pacman -S --noconfirm base-devel git
+          pacman -S --noconfirm base-devel git sudo
           
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -57,6 +58,8 @@ jobs:
         env:
           GNUPGHOME: /root/.gnupg 
         run: |
+          # This step must run as root/default user to ensure GPG files are placed in /root/.gnupg
+          # where the next steps can access and copy them.
           echo "Setting up GNUPGHOME in $GNUPGHOME"
           mkdir -p $GNUPGHOME
           chmod 700 $GNUPGHOME
@@ -64,29 +67,33 @@ jobs:
           echo "${{ secrets.GPG_PRIVATE_KEY }}" > private.key
           gpg --batch --pinentry-mode loopback --passphrase ${{ secrets.GPG_PASSPHRASE }} --import private.key
           
-          # --- CRITICAL FIX: Simplify KEYID extraction ---
-          # Get the ID of the first secret key found
           KEYID=$(gpg --batch --list-secret-keys --keyid-format long | grep sec | head -n 1 | awk '{print $2}' | cut -d/ -f2)
-          echo "Found Key ID: $KEYID"
-          
-          # Set the imported key as ultimately trusted
           echo -e "trust\n5\ny\n" | gpg --batch --command-fd 0 --edit-key $KEYID
           
           rm private.key
-
+          
       - name: Fetch and Build Package
         id: build
         env:
           PKG_NAME: ${{ matrix.package_name }}
-          GNUPGHOME: /root/.gnupg
+          # The HOME for the shell session needs to be /root, but we run commands as 'builder'
+          
         run: |
           echo "Building package: $PKG_NAME"
           
-          git clone "https://aur.archlinux.org/$PKG_NAME.git"
-          cd "$PKG_NAME"
+          # --- Setup for Builder User ---
+          BUILD_DIR=/home/${{ env.BUILDER_USER }}/build/${{ matrix.package_name }}
+          mkdir -p $BUILD_DIR
+          chown -R ${{ env.BUILDER_USER }}:${{ env.BUILDER_USER }} /home/${{ env.BUILDER_USER }}
+
+          # 1. Clone the AUR PKGBUILD AS THE BUILDER USER
+          sudo -u ${{ env.BUILDER_USER }} git clone "https://aur.archlinux.org/$PKG_NAME.git" $BUILD_DIR
           
-          # Build package (-s: install deps, --noconfirm: non-interactive)
-          makepkg -s --skipchecksums --skippgpcheck --noconfirm
+          cd $BUILD_DIR
+          
+          # 2. Build the package AS THE BUILDER USER
+          # The makepkg command will now succeed because it is not running as root.
+          sudo -u ${{ env.BUILDER_USER }} makepkg -s --skipchecksums --skippgpcheck --noconfirm
           
           BUILT_PKG=$(find . -maxdepth 1 -name '*.pkg.tar.zst' | head -n 1)
           if [ -z "$BUILT_PKG" ]; then
@@ -94,41 +101,50 @@ jobs:
             exit 1
           fi
           
-          # Sign the package
-          makepkg --sign
+          # 3. Copy GPG files to builder's home temporarily for signing
+          # Copy .gnupg from root to builder's home and set permissions
+          cp -r /root/.gnupg /home/${{ env.BUILDER_USER }}/
+          chown -R ${{ env.BUILDER_USER }}:${{ env.BUILDER_USER }} /home/${{ env.BUILDER_USER }}/.gnupg
           
-          echo "pkg_file=$BUILT_PKG" >> $GITHUB_OUTPUT
+          # 4. Sign the package AS THE BUILDER USER
+          # makepkg will now find the key in the builder's home directory
+          sudo -u ${{ env.BUILDER_USER }} makepkg --sign
+          
+          # 5. Move the built files back to the root context for publishing
+          mv $BUILT_PKG /root/
+          mv $BUILT_PKG.sig /root/
+          
+          echo "pkg_file=/root/$BUILT_PKG" >> $GITHUB_OUTPUT
           echo "pkg_dir=$PKG_NAME" >> $GITHUB_OUTPUT
 
       - name: Publish and Clean Repository
         env:
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          # pkg_file now includes the /root/ prefix
           PKG_FILE: ${{ steps.build.outputs.pkg_file }}
           PKG_DIR: ${{ steps.build.outputs.pkg_dir }}
           GNUPGHOME: /root/.gnupg
         run: |
-          PKG_NAME=$(basename -s .pkg.tar.zst "$PKG_FILE" | sed -E 's/^(.*)-[0-9].*$/\1/')
+          # Strip the /root/ prefix to get just the filename for repo-add
+          PKG_FILENAME=$(basename "$PKG_FILE")
+          PKG_NAME=$(basename -s .pkg.tar.zst "$PKG_FILENAME" | sed -E 's/^(.*)-[0-9].*$/\1/')
           
-          # 1. Move the new package and its signature
-          mv "$PKG_DIR"/"$PKG_FILE" ${{ env.REPO_NAME }}/
-          mv "$PKG_DIR"/"$PKG_FILE.sig" ${{ env.REPO_NAME }}/
+          # 1. Move the new package and its signature directly to the raveos-repo root
+          mv "$PKG_FILE" ${{ env.REPO_NAME }}/
+          mv "$PKG_FILE.sig" ${{ env.REPO_NAME }}/"$PKG_FILENAME.sig"
 
           # 2. Update and sign the repository database
-          repo-add -s -k "$GPG_KEY_ID" ${{ env.REPO_NAME }}/${{ env.REPO_NAME }}.db.tar.gz ${{ env.REPO_NAME }}/"$PKG_FILE"
+          repo-add -s -k "$GPG_KEY_ID" ${{ env.REPO_NAME }}/${{ env.REPO_NAME }}.db.tar.gz ${{ env.REPO_NAME }}/"$PKG_FILENAME"
 
           # 3. Clean up older package versions
           cd ${{ env.REPO_NAME }}
           
-          # CRITICAL FIX: Define the arithmetic in a shell variable first, 
-          # then use that variable in the tail command. This separates 
-          # the variable definition from the main cleanup logic line.
-          # This should resolve the parsing error.
           VERSIONS_TO_SKIP=$(( ${{ env.MAX_PKG_VERSIONS }} + 1 ))
           
           FILES_TO_DELETE=$(
             find . -maxdepth 1 -type f -name "${PKG_NAME}-*.pkg.tar.zst" \
             | sort -Vr \
-            | tail -n +$VERSIONS_TO_SKIP 
+            | tail -n +$VERSIONS_TO_SKIP
           )
           
           if [ -n "$FILES_TO_DELETE" ]; then
@@ -140,12 +156,11 @@ jobs:
               rm -f "$file.sig"
             done
             
-            # Re-run repo-add to reflect the deletions
             repo-add -s -k "$GPG_KEY_ID" ${{ env.REPO_NAME }}.db.tar.gz *.pkg.tar.zst
           else
             echo "No old package versions to delete for $PKG_NAME. Keeping ${{ env.MAX_PKG_VERSIONS }}."
           fi
-
+          
       - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
