@@ -104,7 +104,7 @@ jobs:
           PKG_DIR: ${{ steps.build.outputs.pkg_dir }}
           GNUPGHOME: /root/.gnupg
           # CRITICAL FIX: Calculate the skip count here to avoid the YAML error on line 108
-          SKIP_COUNT: ${{ env.MAX_PKG_VERSIONS + 1 }} 
+          SKIP_COUNT: '${{ env.MAX_PKG_VERSIONS + 1 }}' 
         run: |
           PKG_NAME=$(basename -s .pkg.tar.zst "$PKG_FILE" | sed -E 's/^(.*)-[0-9].*$/\1/')
           
