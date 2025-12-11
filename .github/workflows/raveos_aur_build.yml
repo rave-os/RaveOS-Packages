@@ -38,7 +38,7 @@ jobs:
       # NOTE: options: --user root is removed. We start as root (default) to set up the builder.
 
     steps:
-    - name: ⚙️ Setup Builder User and Install Dependencies
+      - name: Setup Builder User and Install Dependencies
         run: |
           # The shell running this script is already ROOT, so no need for 'sudo' here.
           
