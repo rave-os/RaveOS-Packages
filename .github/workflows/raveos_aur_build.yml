@@ -38,7 +38,7 @@ jobs:
         run: |
           # 1. Install dependencies first, including 'sudo', which creates necessary files.
           pacman -Sy --noconfirm
-          pacman -S --noconfirm base-devel git sudo
+          pacman -S --noconfirm base-devel git sudo cmake
           
           # 2. Ensure the /etc/sudoers.d directory exists and has correct permissions
           mkdir -p /etc/sudoers.d
@@ -96,7 +96,7 @@ jobs:
           
           # 2. Build the package AS THE BUILDER USER
           # The makepkg command will now succeed because it is not running as root.
-          sudo -u ${{ env.BUILDER_USER }} makepkg -s --skipchecksums --skippgpcheck --noconfirm
+          sudo -u ${{ env.BUILDER_USER }} makepkg -s -f --skipchecksums --skippgpcheck --noconfirm
           
           BUILT_PKG=$(find . -maxdepth 1 -name '*.pkg.tar.zst' | head -n 1)
           if [ -z "$BUILT_PKG" ]; then
