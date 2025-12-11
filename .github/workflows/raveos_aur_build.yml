@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package_name: 
+        package_name:
           - lib32-gtk2
           - gtk2
           - hydrapaper
@@ -103,6 +103,9 @@ jobs:
           PKG_FILE: ${{ steps.build.outputs.pkg_file }}
           PKG_DIR: ${{ steps.build.outputs.pkg_dir }}
           GNUPGHOME: /root/.gnupg
+          # NEW ENV: Calculate MAX_PKG_VERSIONS + 1 outside the run block
+          # This should be line ~69, well before line 74
+          SKIP_COUNT: ${{ env.MAX_PKG_VERSIONS + 1 }} 
         run: |
           PKG_NAME=$(basename -s .pkg.tar.zst "$PKG_FILE" | sed -E 's/^(.*)-[0-9].*$/\1/')
           
@@ -116,15 +119,12 @@ jobs:
           # 3. Clean up older package versions
           cd ${{ env.REPO_NAME }}
           
-          # FIX START: Calculate the number of versions to skip outside the command substitution
-          VERSIONS_TO_SKIP=$(( ${{ env.MAX_PKG_VERSIONS }} + 1 ))
-          
+          # Use the pre-calculated SKIP_COUNT environment variable directly (no shell arithmetic needed here)
           FILES_TO_DELETE=$(
             find . -maxdepth 1 -type f -name "${PKG_NAME}-*.pkg.tar.zst" \
             | sort -Vr \
-            | tail -n +$VERSIONS_TO_SKIP  # Use the shell variable here
+            | tail -n +${{ env.SKIP_COUNT }}  # FIX APPLIED HERE (was line 74 before)
           )
-          # FIX END
           
           if [ -n "$FILES_TO_DELETE" ]; then
             echo "Deleting old package versions:"
@@ -138,7 +138,7 @@ jobs:
             # Re-run repo-add to reflect the deletions
             repo-add -s -k "$GPG_KEY_ID" ${{ env.REPO_NAME }}.db.tar.gz *.pkg.tar.zst
           else
-            echo "No old package versions to delete for $PKG_NAME. Keeping $MAX_PKG_VERSIONS."
+            echo "No old package versions to delete for $PKG_NAME. Keeping ${{ env.MAX_PKG_VERSIONS }}."
           fi
 
       - name: Commit and Push Changes
