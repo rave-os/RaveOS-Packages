@@ -1,6 +1,9 @@
 name: RaveOS AUR Package Build and Publish
 
 on:
+  push:
+    branches:
+      - main
   # Manual Trigger
   workflow_dispatch: {}
   
