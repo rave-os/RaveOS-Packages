@@ -71,7 +71,7 @@ jobs:
           
           rm private.key
           
-      - name: Fetch and Build Package:
+      - name: Fetch and Build Package
         id: build
         env:
           PKG_NAME: ${{ matrix.package_name }}
