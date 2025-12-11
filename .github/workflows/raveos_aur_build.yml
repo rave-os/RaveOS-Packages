@@ -116,11 +116,15 @@ jobs:
           # 3. Clean up older package versions
           cd ${{ env.REPO_NAME }}
           
+          # FIX START: Calculate the number of versions to skip outside the command substitution
+          VERSIONS_TO_SKIP=$(( ${{ env.MAX_PKG_VERSIONS }} + 1 ))
+          
           FILES_TO_DELETE=$(
             find . -maxdepth 1 -type f -name "${PKG_NAME}-*.pkg.tar.zst" \
             | sort -Vr \
-            | tail -n +$((env.MAX_PKG_VERSIONS + 1))
+            | tail -n +$VERSIONS_TO_SKIP  # Use the shell variable here
           )
+          # FIX END
           
           if [ -n "$FILES_TO_DELETE" ]; then
             echo "Deleting old package versions:"
@@ -136,7 +140,7 @@ jobs:
           else
             echo "No old package versions to delete for $PKG_NAME. Keeping $MAX_PKG_VERSIONS."
           fi
-          
+
       - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
